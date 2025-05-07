@@ -1,4 +1,4 @@
-name: Deploy to prod
+name: Production Deployment of new version of portkey
 
 on:
   push:
@@ -28,7 +28,6 @@ jobs:
           CUSTOM_DOMAIN: ${{ secrets.CUSTOM_DOMAIN }}
         run: |
           node build.mjs
-          cat wrangler.toml
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
