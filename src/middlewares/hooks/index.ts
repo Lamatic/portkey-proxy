@@ -34,14 +34,16 @@ export class HookSpan {
     beforeRequestHooks: HookObject[],
     afterRequestHooks: HookObject[],
     parentHookSpanId: string | null,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ) {
     this.context = this.createContext(
       requestParams,
       metadata,
       provider,
       isStreamingRequest,
-      requestType
+      requestType,
+      requestHeaders
     );
     this.beforeRequestHooks = this.initializeHooks(
       beforeRequestHooks,
@@ -64,7 +66,8 @@ export class HookSpan {
     metadata: Record<string, string>,
     provider: string,
     isStreamingRequest: boolean,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ): HookSpanContext {
     const requestText = this.extractRequestText(requestParams);
     return {
@@ -73,6 +76,7 @@ export class HookSpan {
         text: requestText,
         isStreamingRequest,
         isTransformed: false,
+        headers: requestHeaders,
       },
       response: {
         json: {},
@@ -211,7 +215,8 @@ export class HooksManager {
     beforeRequestHooks: HookObject[],
     afterRequestHooks: HookObject[],
     parentHookSpanId: string | null,
-    requestType: string
+    requestType: string,
+    requestHeaders: Record<string, string>
   ): HookSpan {
     const span = new HookSpan(
       requestParams,
@@ -221,7 +226,8 @@ export class HooksManager {
       beforeRequestHooks,
       afterRequestHooks,
       parentHookSpanId,
-      requestType
+      requestType,
+      requestHeaders
     );
 
     this.spans[span.id] = span;
@@ -300,6 +306,8 @@ export class HooksManager {
         transformed: result.transformed || false,
         created_at: createdAt,
         log: result.log || null,
+        fail_on_error:
+          (check.parameters as Record<string, any>)?.failOnError || false,
       };
     } catch (err: any) {
       console.error(`Error executing check "${check.id}":`, err);
@@ -384,7 +392,10 @@ export class HooksManager {
     }
 
     hookResult = {
-      verdict: checkResults.every((result) => result.verdict || result.error),
+      // if guardrail has error, make verdict false else do the normal check
+      verdict: checkResults.every(
+        (result) => result.verdict || (result.error && !result.fail_on_error)
+      ),
       id: hook.id,
       transformed: checkResults.some((result) => result.transformed),
       checks: checkResults,

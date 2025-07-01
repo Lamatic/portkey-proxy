@@ -197,6 +197,7 @@ export interface Targets {
 
   defaultInputGuardrails?: HookObject[];
   defaultOutputGuardrails?: HookObject[];
+  originalIndex?: number;
 }
 
 /**
@@ -216,6 +217,7 @@ export interface Config {
 }
 
 /**
+ * TODO: make this a union type
  * A message content type.
  * @interface
  */
@@ -230,6 +232,17 @@ export interface ContentType extends PromptCache {
     mime_type?: string;
   };
   data?: string;
+  file?: {
+    file_data?: string;
+    file_id?: string;
+    file_name?: string;
+    file_url?: string;
+    mime_type?: string;
+  };
+  input_audio?: {
+    data: string;
+    format: string; //defaults to auto
+  };
 }
 
 export interface ToolCall {
@@ -345,6 +358,12 @@ export interface Tool extends PromptCache {
   type: string;
   /** A description of the function. */
   function: Function;
+  computer?: {
+    name: string;
+    display_width_px: number;
+    display_height_px: number;
+    display_number: number;
+  };
 }
 
 /**
@@ -408,6 +427,10 @@ export interface Params {
     type?: string;
     budget_tokens: number;
   };
+  // Embeddings specific
+  dimensions?: number;
+  parameters?: any;
+  [key: string]: any;
 }
 
 interface Examples {
