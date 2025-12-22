@@ -1,10 +1,11 @@
+import { BatchEndpoints } from '../globals';
 import { HookObject } from '../middlewares/hooks/types';
 
 /**
  * Settings for retrying requests.
  * @interface
  */
-interface RetrySettings {
+export interface RetrySettings {
   /** The maximum number of retry attempts. */
   attempts: number;
   /** The HTTP status codes on which to retry. */
@@ -13,7 +14,7 @@ interface RetrySettings {
   useRetryAfterHeader?: boolean;
 }
 
-interface CacheSettings {
+export interface CacheSettings {
   mode: string;
   maxAge?: number;
 }
@@ -43,7 +44,7 @@ interface Strategy {
  */
 export interface Options {
   /** The name of the provider. */
-  provider: string | undefined;
+  provider: string;
   /** The name of the API key for the provider. */
   virtualKey?: string;
   /** The API key for the provider. */
@@ -63,6 +64,7 @@ export interface Options {
   adAuth?: string;
   azureAuthMode?: string;
   azureManagedClientId?: string;
+  azureWorkloadClientId?: string;
   azureEntraClientId?: string;
   azureEntraClientSecret?: string;
   azureEntraTenantId?: string;
@@ -94,6 +96,8 @@ export interface Options {
   awsBedrockModel?: string;
   awsServerSideEncryption?: string;
   awsServerSideEncryptionKMSKeyId?: string;
+  awsService?: string;
+  foundationModel?: string;
 
   /** Sagemaker specific */
   amznSagemakerCustomAttributes?: string;
@@ -120,6 +124,7 @@ export interface Options {
   vertexServiceAccountJson?: Record<string, any>;
   vertexStorageBucketName?: string;
   vertexModelName?: string;
+  vertexBatchEndpoint?: BatchEndpoints;
 
   // Required for file uploads with google.
   filename?: string;
@@ -128,31 +133,50 @@ export interface Options {
   beforeRequestHooks?: HookObject[];
   defaultInputGuardrails?: HookObject[];
   defaultOutputGuardrails?: HookObject[];
-
   /** OpenAI specific */
   openaiProject?: string;
   openaiOrganization?: string;
   openaiBeta?: string;
-
   /** Azure Inference Specific */
-  azureDeploymentName?: string;
   azureApiVersion?: string;
-  azureExtraParams?: string;
   azureFoundryUrl?: string;
+  azureExtraParameters?: string;
+  azureDeploymentName?: string;
 
   /** The parameter to determine if extra non-openai compliant fields should be returned in response */
   strictOpenAiCompliance?: boolean;
+
   /** Parameter to determine if fim/completions endpoint is to be used */
-  mistralFimCompletion?: String;
+  mistralFimCompletion?: string;
+
   /** Anthropic specific headers */
   anthropicBeta?: string;
   anthropicVersion?: string;
+  anthropicApiKey?: string;
 
   /** Fireworks finetune required fields */
   fireworksAccountId?: string;
+  fireworksFileLength?: string;
 
   /** Cortex specific fields */
   snowflakeAccount?: string;
+
+  /** Azure entra scope */
+  azureEntraScope?: string;
+
+  // Oracle specific fields
+  oracleApiVersion?: string; // example: 20160918
+  oracleRegion?: string; // example: us-ashburn-1
+  oracleCompartmentId?: string; // example: ocid1.compartment.oc1..aaaaaaaab7x77777777777777777
+  oracleServingMode?: string; // supported values: ON_DEMAND, DEDICATED
+  oracleTenancy?: string; // example: ocid1.tenancy.oc1..aaaaaaaab7x77777777777777777
+  oracleUser?: string; // example: ocid1.user.oc1..aaaaaaaab7x77777777777777777
+  oracleFingerprint?: string; // example: 12:34:56:78:90:ab:cd:ef:12:34:56:78:90:ab:cd:ef
+  oraclePrivateKey?: string; // example: -----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...
+  oracleKeyPassphrase?: string; // example: password
+
+  /** Model pricing config */
+  modelPricingConfig?: Record<string, any>;
 }
 
 /**
@@ -197,6 +221,7 @@ export interface Targets {
 
   defaultInputGuardrails?: HookObject[];
   defaultOutputGuardrails?: HookObject[];
+  originalIndex?: number;
 }
 
 /**
@@ -216,6 +241,7 @@ export interface Config {
 }
 
 /**
+ * TODO: make this a union type
  * A message content type.
  * @interface
  */
@@ -230,6 +256,17 @@ export interface ContentType extends PromptCache {
     mime_type?: string;
   };
   data?: string;
+  file?: {
+    file_data?: string;
+    file_id?: string;
+    file_name?: string;
+    file_url?: string;
+    mime_type?: string;
+  };
+  input_audio?: {
+    data: string;
+    format: 'mp3' | 'wav' | string; //defaults to auto
+  };
 }
 
 export interface ToolCall {
@@ -238,6 +275,8 @@ export interface ToolCall {
   function: {
     name: string;
     arguments: string;
+    description?: string;
+    thought_signature?: string;
   };
 }
 
@@ -283,6 +322,8 @@ export interface Message {
   tool_calls?: any;
   tool_call_id?: string;
   citationMetadata?: CitationMetadata;
+  /** Reasoning details for models that support extended thinking/reasoning. (Gemini) */
+  reasoning_details?: any[];
 }
 
 export interface PromptCache {
@@ -322,6 +363,24 @@ export interface Function {
   parameters?: JsonSchema;
   /** Whether to enable strict schema adherence when generating the function call. If set to true, the model will follow the exact schema defined in the parameters field. Only a subset of JSON Schema is supported when strict is true */
   strict?: boolean;
+  /**
+   * When true, this tool is not loaded into context initially.
+   * Claude discovers it via Tool Search Tool on-demand.
+   * Part of Anthropic's advanced tool use beta features.
+   */
+  defer_loading?: boolean;
+  /**
+   * List of tool types that can call this tool programmatically.
+   * E.g., ["code_execution_20250825"] enables Programmatic Tool Calling.
+   * Part of Anthropic's advanced tool use beta features.
+   */
+  allowed_callers?: string[];
+  /**
+   * Example inputs demonstrating how to use this tool.
+   * Helps Claude understand usage patterns beyond JSON schema.
+   * Part of Anthropic's advanced tool use beta features.
+   */
+  input_examples?: Record<string, any>[];
 }
 
 export interface ToolChoiceObject {
@@ -331,7 +390,19 @@ export interface ToolChoiceObject {
   };
 }
 
-export type ToolChoice = ToolChoiceObject | 'none' | 'auto' | 'required';
+export interface CustomToolChoice {
+  type: 'custom';
+  custom: {
+    name?: string;
+  };
+}
+
+export type ToolChoice =
+  | ToolChoiceObject
+  | CustomToolChoice
+  | 'none'
+  | 'auto'
+  | 'required';
 
 /**
  * A tool in the conversation.
@@ -344,7 +415,9 @@ export interface Tool extends PromptCache {
   /** The name of the function. */
   type: string;
   /** A description of the function. */
-  function: Function;
+  function?: Function;
+  // this is used to support tools like computer, web_search, etc.
+  [key: string]: any;
 }
 
 /**
@@ -377,6 +450,7 @@ export interface Params {
   top_k?: number;
   tools?: Tool[];
   tool_choice?: ToolChoice;
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | string;
   response_format?: {
     type: 'json_object' | 'text' | 'json_schema';
     json_schema?: any;
@@ -408,6 +482,9 @@ export interface Params {
     type?: string;
     budget_tokens: number;
   };
+  // Embeddings specific
+  dimensions?: number;
+  parameters?: any;
 }
 
 interface Examples {

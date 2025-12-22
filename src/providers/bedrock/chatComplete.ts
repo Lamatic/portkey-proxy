@@ -1,4 +1,9 @@
-import { BEDROCK, documentMimeTypes, imagesMimeTypes } from '../../globals';
+import {
+  BEDROCK,
+  fileExtensionMimeTypeMap,
+  imagesMimeTypes,
+  videoMimeTypes,
+} from '../../globals';
 import {
   Message,
   Params,
@@ -15,6 +20,7 @@ import {
 import {
   generateErrorResponse,
   generateInvalidProviderResponseError,
+  transformFinishReason,
 } from '../utils';
 import {
   BedrockAI21CompleteResponse,
@@ -23,6 +29,13 @@ import {
 } from './complete';
 import { BedrockErrorResponse } from './embed';
 import {
+  BedrockChatCompleteStreamChunk,
+  BedrockChatCompletionResponse,
+  BedrockContentItem,
+  BedrockStreamState,
+} from './types';
+import {
+  getBedrockErrorChunk,
   transformAdditionalModelRequestFields,
   transformAI21AdditionalModelRequestFields,
   transformAnthropicAdditionalModelRequestFields,
@@ -131,12 +144,17 @@ const transformAndAppendThinkingMessageItem = (
 };
 
 const getMessageContent = (message: Message) => {
-  if (!message.content && !message.tool_calls) return [];
+  if (!message.content && !message.tool_calls && !message.tool_call_id)
+    return [];
   if (message.role === 'tool') {
+    const toolResultContent = getMessageTextContentArray(message);
     return [
       {
         toolResult: {
-          content: getMessageTextContentArray(message),
+          ...(toolResultContent.length &&
+          (toolResultContent[0] as { text: string })?.text
+            ? { content: toolResultContent }
+            : { content: [] }), // Bedrock allows empty array but does not allow empty string in content.
           toolUseId: message.tool_call_id,
         },
       },
@@ -146,11 +164,11 @@ const getMessageContent = (message: Message) => {
   const inputContent: ContentType[] | string | undefined =
     message.content_blocks ?? message.content;
   // if message is a string, return a single element array with the text
-  if (typeof inputContent === 'string') {
+  if (typeof inputContent === 'string' && inputContent.trim()) {
     out.push({
       text: inputContent,
     });
-  } else if (inputContent) {
+  } else if (inputContent && Array.isArray(inputContent)) {
     inputContent.forEach((item) => {
       if (item.type === 'text') {
         out.push({
@@ -172,13 +190,69 @@ const getMessageContent = (message: Message) => {
               format: fileFormat,
             },
           });
-        } else if (documentMimeTypes.includes(mimeType)) {
+        } else if (videoMimeTypes.includes(mimeType)) {
+          out.push({
+            video: {
+              format: fileFormat,
+              source: {
+                bytes,
+              },
+            },
+          });
+        } else {
           out.push({
             document: {
               format: fileFormat,
               name: crypto.randomUUID(),
               source: {
                 bytes,
+              },
+            },
+          });
+        }
+      } else if (item.type === 'file') {
+        const mimeType = item.file?.mime_type || fileExtensionMimeTypeMap.pdf;
+        const fileFormat = mimeType.split('/')[1];
+        if (imagesMimeTypes.includes(mimeType)) {
+          out.push({
+            image: {
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
+              },
+              format: fileFormat,
+            },
+          });
+        } else if (videoMimeTypes.includes(mimeType)) {
+          out.push({
+            video: {
+              format: fileFormat,
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
+              },
+            },
+          });
+        } else {
+          out.push({
+            document: {
+              format: fileFormat,
+              name: item.file?.file_name || crypto.randomUUID(),
+              source: {
+                ...(item.file?.file_data && { bytes: item.file.file_data }),
+                ...(item.file?.file_url && {
+                  s3Location: {
+                    uri: item.file.file_url,
+                  },
+                }),
               },
             },
           });
@@ -249,7 +323,9 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
       required: false,
       transform: (params: BedrockChatCompletionsParams) => {
         if (!params.messages) return;
-        const systemMessages = params.messages.reduce(
+        const systemMessages: Array<
+          { text: string } | { cachePoint: { type: string } }
+        > = params.messages.reduce(
           (
             acc: Array<{ text: string } | { cachePoint: { type: string } }>,
             msg
@@ -274,13 +350,15 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
         | { cachePoint: { type: string } }
       > = [];
       params.tools?.forEach((tool) => {
-        tools.push({
-          toolSpec: {
-            name: tool.function.name,
-            description: tool.function.description,
-            inputSchema: { json: tool.function.parameters },
-          },
-        });
+        if (tool.function) {
+          tools.push({
+            toolSpec: {
+              name: tool.function.name,
+              description: tool.function.description,
+              inputSchema: { json: tool.function.parameters },
+            },
+          });
+        }
         if (tool.cache_control && !canBeAmazonModel) {
           tools.push({
             cachePoint: {
@@ -290,7 +368,7 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
         }
       });
       const toolConfig = {
-        tools: tools,
+        tools,
       };
       let toolChoice = undefined;
       if (params.tool_choice) {
@@ -312,7 +390,8 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
           }
         }
       }
-      return { ...toolConfig, toolChoice };
+      // TODO: split this into two provider options, one for tools and one for toolChoice
+      return tools.length ? { ...toolConfig, toolChoice } : null;
     },
   },
   guardrailConfig: {
@@ -366,71 +445,11 @@ export const BedrockConverseChatCompleteConfig: ProviderConfig = {
     transform: (params: BedrockChatCompletionsParams) =>
       transformAdditionalModelRequestFields(params),
   },
-  top_k: {
-    param: 'additionalModelRequestFields',
-    transform: (params: BedrockChatCompletionsParams) =>
-      transformAdditionalModelRequestFields(params),
-  },
-  response_format: {
-    param: 'additionalModelRequestFields',
-    transform: (params: BedrockChatCompletionsParams) =>
-      transformAdditionalModelRequestFields(params),
+  performance_config: {
+    param: 'performanceConfig',
+    required: false,
   },
 };
-
-type BedrockContentItem = {
-  text?: string;
-  toolUse?: {
-    toolUseId: string;
-    name: string;
-    input: object;
-  };
-  reasoningContent?: {
-    reasoningText?: {
-      signature: string;
-      text: string;
-    };
-    redactedContent?: string;
-  };
-  image?: {
-    source: {
-      bytes: string;
-    };
-    format: string;
-  };
-  document?: {
-    format: string;
-    name: string;
-    source: {
-      bytes: string;
-    };
-  };
-  cachePoint?: {
-    type: string;
-  };
-};
-
-interface BedrockChatCompletionResponse {
-  metrics: {
-    latencyMs: number;
-  };
-  output: {
-    message: {
-      role: string;
-      content: BedrockContentItem[];
-    };
-  };
-  stopReason: string;
-  usage: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    cacheReadInputTokenCount?: number;
-    cacheReadInputTokens?: number;
-    cacheWriteInputTokenCount?: number;
-    cacheWriteInputTokens?: number;
-  };
-}
 
 export const BedrockErrorResponseTransform: (
   response: BedrockErrorResponse
@@ -492,10 +511,6 @@ export const BedrockChatCompleteResponseTransform: (
   }
 
   if ('output' in response) {
-    const shouldSendCacheUsage =
-      response.usage.cacheWriteInputTokens ||
-      response.usage.cacheReadInputTokens;
-
     let content: string = '';
     content = response.output.message.content
       .filter((item) => item.text)
@@ -504,6 +519,9 @@ export const BedrockChatCompleteResponseTransform: (
     const contentBlocks = !strictOpenAiCompliance
       ? transformContentBlocks(response.output.message.content)
       : undefined;
+
+    const cacheReadInputTokens = response.usage?.cacheReadInputTokens || 0;
+    const cacheWriteInputTokens = response.usage?.cacheWriteInputTokens || 0;
 
     const responseObj: ChatCompletionResponse = {
       id: Date.now().toString(),
@@ -521,16 +539,26 @@ export const BedrockChatCompleteResponseTransform: (
               content_blocks: contentBlocks,
             }),
           },
-          finish_reason: response.stopReason,
+          finish_reason: transformFinishReason(
+            response.stopReason,
+            strictOpenAiCompliance
+          ),
         },
       ],
       usage: {
-        prompt_tokens: response.usage.inputTokens,
+        prompt_tokens:
+          response.usage.inputTokens +
+          cacheReadInputTokens +
+          cacheWriteInputTokens,
         completion_tokens: response.usage.outputTokens,
-        total_tokens: response.usage.totalTokens,
-        ...(shouldSendCacheUsage && {
-          cache_read_input_tokens: response.usage.cacheReadInputTokens,
-          cache_creation_input_tokens: response.usage.cacheWriteInputTokens,
+        total_tokens: response.usage.totalTokens, // contains the cache usage as well
+        prompt_tokens_details: {
+          cached_tokens: cacheReadInputTokens,
+        },
+        // we only want to be sending this for anthropic models and this is not openai compliant
+        ...((cacheReadInputTokens > 0 || cacheWriteInputTokens > 0) && {
+          cache_read_input_tokens: cacheReadInputTokens,
+          cache_creation_input_tokens: cacheWriteInputTokens,
         }),
       },
     };
@@ -552,48 +580,6 @@ export const BedrockChatCompleteResponseTransform: (
   return generateInvalidProviderResponseError(response, BEDROCK);
 };
 
-export interface BedrockChatCompleteStreamChunk {
-  contentBlockIndex?: number;
-  delta?: {
-    text: string;
-    toolUse: {
-      toolUseId: string;
-      name: string;
-      input: object;
-    };
-    reasoningContent?: {
-      text?: string;
-      signature?: string;
-      redactedContent?: string;
-    };
-  };
-  start?: {
-    toolUse: {
-      toolUseId: string;
-      name: string;
-      input?: object;
-    };
-  };
-  stopReason?: string;
-  metrics?: {
-    latencyMs: number;
-  };
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-    totalTokens: number;
-    cacheReadInputTokenCount?: number;
-    cacheReadInputTokens?: number;
-    cacheWriteInputTokenCount?: number;
-    cacheWriteInputTokens?: number;
-  };
-}
-
-interface BedrockStreamState {
-  stopReason?: string;
-  currentToolCallIndex?: number;
-}
-
 // refer: https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ConverseStream.html
 export const BedrockChatCompleteStreamChunkTransform: (
   response: string,
@@ -609,6 +595,9 @@ export const BedrockChatCompleteStreamChunkTransform: (
   gatewayRequest
 ) => {
   const parsedChunk: BedrockChatCompleteStreamChunk = JSON.parse(responseChunk);
+  if (parsedChunk.message) {
+    return getBedrockErrorChunk(fallbackId, gatewayRequest.model || '');
+  }
   if (parsedChunk.stopReason) {
     streamState.stopReason = parsedChunk.stopReason;
   }
@@ -617,9 +606,9 @@ export const BedrockChatCompleteStreamChunkTransform: (
   }
 
   if (parsedChunk.usage) {
-    const shouldSendCacheUsage =
-      parsedChunk.usage.cacheWriteInputTokens ||
-      parsedChunk.usage.cacheReadInputTokens;
+    const cacheReadInputTokens = parsedChunk.usage?.cacheReadInputTokens || 0;
+    const cacheWriteInputTokens = parsedChunk.usage?.cacheWriteInputTokens || 0;
+
     return [
       `data: ${JSON.stringify({
         id: fallbackId,
@@ -631,17 +620,26 @@ export const BedrockChatCompleteStreamChunkTransform: (
           {
             index: 0,
             delta: {},
-            finish_reason: streamState.stopReason,
+            finish_reason: transformFinishReason(
+              streamState.stopReason,
+              strictOpenAiCompliance
+            ),
           },
         ],
         usage: {
-          prompt_tokens: parsedChunk.usage.inputTokens,
+          prompt_tokens:
+            parsedChunk.usage.inputTokens +
+            cacheReadInputTokens +
+            cacheWriteInputTokens,
           completion_tokens: parsedChunk.usage.outputTokens,
           total_tokens: parsedChunk.usage.totalTokens,
-          ...(shouldSendCacheUsage && {
-            cache_read_input_tokens: parsedChunk.usage.cacheReadInputTokens,
-            cache_creation_input_tokens:
-              parsedChunk.usage.cacheWriteInputTokens,
+          prompt_tokens_details: {
+            cached_tokens: cacheReadInputTokens,
+          },
+          // we only want to be sending this for anthropic models and this is not openai compliant
+          ...((cacheReadInputTokens > 0 || cacheWriteInputTokens > 0) && {
+            cache_read_input_tokens: cacheReadInputTokens,
+            cache_creation_input_tokens: cacheWriteInputTokens,
           }),
         },
       })}\n\n`,
@@ -709,6 +707,7 @@ export const BedrockChatCompleteStreamChunkTransform: (
             }),
           tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
         },
+        finish_reason: null,
       },
     ],
   })}\n\n`;
@@ -842,7 +841,7 @@ export const BedrockCohereChatCompleteConfig: ProviderConfig = {
     required: true,
     transform: (params: Params) => {
       let prompt: string = '';
-      if (!!params.messages) {
+      if (params.messages) {
         let messages: Message[] = params.messages;
         messages.forEach((msg, index) => {
           if (index === 0 && SYSTEM_MESSAGE_ROLES.includes(msg.role)) {
@@ -1044,7 +1043,7 @@ export const BedrockAI21ChatCompleteConfig: ProviderConfig = {
     required: true,
     transform: (params: Params) => {
       let prompt: string = '';
-      if (!!params.messages) {
+      if (params.messages) {
         let messages: Message[] = params.messages;
         messages.forEach((msg, index) => {
           if (index === 0 && SYSTEM_MESSAGE_ROLES.includes(msg.role)) {

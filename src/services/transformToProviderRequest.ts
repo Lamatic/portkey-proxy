@@ -1,7 +1,10 @@
 import { GatewayError } from '../errors/GatewayError';
+import { AZURE_OPEN_AI, FIREWORKS_AI } from '../globals';
 import ProviderConfigs from '../providers';
 import { endpointStrings, ProviderConfig } from '../providers/types';
 import { Options, Params } from '../types/requestBody';
+
+// TODO: Refactor this file to use the providerOptions object instead of the provider string
 
 /**
  * Helper function to set a nested property in an object.
@@ -22,12 +25,17 @@ function setNestedProperty(obj: any, path: string, value: any) {
   current[parts[parts.length - 1]] = value;
 }
 
-const getValue = (configParam: string, params: Params, paramConfig: any) => {
+const getValue = (
+  configParam: string,
+  params: Params,
+  paramConfig: any,
+  providerOptions?: Options
+) => {
   let value = params[configParam as keyof typeof params];
 
   // If a transformation is defined for this parameter, apply it
   if (paramConfig.transform) {
-    value = paramConfig.transform(params);
+    value = paramConfig.transform(params, providerOptions);
   }
 
   if (
@@ -83,7 +91,12 @@ export const transformUsingProviderConfig = (
       // If the parameter is present in the incoming request body
       if (configParam in params) {
         // Get the value for this parameter
-        const value = getValue(configParam, params, paramConfig);
+        const value = getValue(
+          configParam,
+          params,
+          paramConfig,
+          providerOptions
+        );
 
         // Set the transformed parameter to the validated value
         setNestedProperty(
@@ -136,7 +149,7 @@ const transformToProviderRequestJSON = (
   // Get the configuration for the specified provider
   let providerConfig = ProviderConfigs[provider];
   if (providerConfig.getConfig) {
-    providerConfig = providerConfig.getConfig(params)[fn];
+    providerConfig = providerConfig.getConfig({ params, providerOptions })[fn];
   } else {
     providerConfig = providerConfig[fn];
   }
@@ -151,11 +164,12 @@ const transformToProviderRequestJSON = (
 const transformToProviderRequestFormData = (
   provider: string,
   params: Params,
-  fn: string
+  fn: string,
+  providerOptions: Options
 ): FormData => {
   let providerConfig = ProviderConfigs[provider];
   if (providerConfig.getConfig) {
-    providerConfig = providerConfig.getConfig(params)[fn];
+    providerConfig = providerConfig.getConfig({ params, providerOptions })[fn];
   } else {
     providerConfig = providerConfig[fn];
   }
@@ -167,7 +181,12 @@ const transformToProviderRequestFormData = (
     }
     for (const paramConfig of paramConfigs) {
       if (configParam in params) {
-        const value = getValue(configParam, params, paramConfig);
+        const value = getValue(
+          configParam,
+          params,
+          paramConfig,
+          providerOptions
+        );
 
         formData.append(paramConfig.param, value);
       } else if (
@@ -188,22 +207,19 @@ const transformToProviderRequestFormData = (
   return formData;
 };
 
-const transformToProviderRequestReadableStream = (
+const transformToProviderRequestBody = (
   provider: string,
   requestBody: ReadableStream,
   requestHeaders: Record<string, string>,
+  providerOptions: Options,
   fn: string
 ) => {
-  if (ProviderConfigs[provider].getConfig) {
-    return ProviderConfigs[provider]
-      .getConfig({}, fn)
-      .requestTransforms[fn](requestBody, requestHeaders);
-  } else {
-    return ProviderConfigs[provider].requestTransforms[fn](
-      requestBody,
-      requestHeaders
-    );
+  let providerConfig = ProviderConfigs[provider];
+  if (providerConfig.getConfig) {
+    providerConfig = providerConfig.getConfig({ params: {}, providerOptions });
   }
+
+  return providerConfig.requestTransforms[fn](requestBody, requestHeaders);
 };
 
 /**
@@ -225,13 +241,28 @@ export const transformToProviderRequest = (
 ) => {
   // this returns a ReadableStream
   if (fn === 'uploadFile') {
-    return transformToProviderRequestReadableStream(
+    return transformToProviderRequestBody(
       provider,
       requestBody as ReadableStream,
       requestHeaders,
+      providerOptions,
       fn
     );
   }
+
+  if (
+    fn === 'createFinetune' &&
+    [AZURE_OPEN_AI, FIREWORKS_AI].includes(provider)
+  ) {
+    return transformToProviderRequestBody(
+      provider,
+      requestBody as ReadableStream,
+      requestHeaders,
+      providerOptions,
+      fn
+    );
+  }
+
   if (requestBody instanceof FormData || requestBody instanceof ArrayBuffer)
     return requestBody;
 
@@ -244,7 +275,12 @@ export const transformToProviderRequest = (
     providerAPIConfig.transformToFormData &&
     providerAPIConfig.transformToFormData({ gatewayRequestBody: params })
   )
-    return transformToProviderRequestFormData(provider, params as Params, fn);
+    return transformToProviderRequestFormData(
+      provider,
+      params as Params,
+      fn,
+      providerOptions
+    );
   return transformToProviderRequestJSON(
     provider,
     params as Params,

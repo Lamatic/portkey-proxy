@@ -13,6 +13,19 @@ import { handler as defaultalluppercase } from './default/alluppercase';
 import { handler as defaultalllowercase } from './default/alllowercase';
 import { handler as defaultendsWith } from './default/endsWith';
 import { handler as defaultmodelWhitelist } from './default/modelWhitelist';
+import { handler as qualifireDangerousContent } from './qualifire/dangerousContent';
+import { handler as qualifireGrounding } from './qualifire/grounding';
+import { handler as qualifireHarassment } from './qualifire/harassment';
+import { handler as qualifireInstructionFollowing } from './qualifire/instructionFollowing';
+import { handler as qualifirePolicy } from './qualifire/policy';
+import { handler as qualifireSexualContent } from './qualifire/sexualContent';
+import { handler as qualifireToolUseQuality } from './qualifire/toolUseQuality';
+import { handler as qualifireHallucinations } from './qualifire/hallucinations';
+import { handler as qualifireHateSpeech } from './qualifire/hateSpeech';
+import { handler as qualifirePii } from './qualifire/pii';
+import { handler as qualifirePromptInjections } from './qualifire/promptInjections';
+import { handler as defaultaddPrefix } from './default/addPrefix';
+import { handler as defaultmodelRules } from './default/modelRules';
 import { handler as portkeymoderateContent } from './portkey/moderateContent';
 import { handler as portkeylanguage } from './portkey/language';
 import { handler as portkeypii } from './portkey/pii';
@@ -46,7 +59,14 @@ import { handler as azurePii } from './azure/pii';
 import { handler as azureContentSafety } from './azure/contentSafety';
 import { handler as promptSecurityProtectPrompt } from './promptsecurity/protectPrompt';
 import { handler as promptSecurityProtectResponse } from './promptsecurity/protectResponse';
-
+import { handler as panwPrismaAirsintercept } from './panw-prisma-airs/intercept';
+import { handler as defaultjwt } from './default/jwt';
+import { handler as defaultrequiredMetadataKeys } from './default/requiredMetadataKeys';
+import { handler as walledaiguardrails } from './walledai/walledprotect';
+import { handler as defaultregexReplace } from './default/regexReplace';
+import { handler as defaultallowedRequestTypes } from './default/allowedRequestTypes';
+import { handler as javelinguardrails } from './javelin/guardrails';
+import { handler as f5GuardrailsScan } from './f5-guardrails/scan';
 export const plugins = {
   default: {
     regexMatch: defaultregexMatch,
@@ -64,6 +84,25 @@ export const plugins = {
     alllowercase: defaultalllowercase,
     endsWith: defaultendsWith,
     modelWhitelist: defaultmodelWhitelist,
+    modelRules: defaultmodelRules,
+    jwt: defaultjwt,
+    requiredMetadataKeys: defaultrequiredMetadataKeys,
+    addPrefix: defaultaddPrefix,
+    regexReplace: defaultregexReplace,
+    allowedRequestTypes: defaultallowedRequestTypes,
+  },
+  qualifire: {
+    dangerousContent: qualifireDangerousContent,
+    grounding: qualifireGrounding,
+    harassment: qualifireHarassment,
+    instructionFollowing: qualifireInstructionFollowing,
+    policy: qualifirePolicy,
+    sexualContent: qualifireSexualContent,
+    toolUseQuality: qualifireToolUseQuality,
+    hallucinations: qualifireHallucinations,
+    hateSpeech: qualifireHateSpeech,
+    pii: qualifirePii,
+    promptInjections: qualifirePromptInjections,
   },
   portkey: {
     moderateContent: portkeymoderateContent,
@@ -125,5 +164,17 @@ export const plugins = {
   promptsecurity: {
     protectPrompt: promptSecurityProtectPrompt,
     protectResponse: promptSecurityProtectResponse,
+  },
+  'panw-prisma-airs': {
+    intercept: panwPrismaAirsintercept,
+  },
+  walledai: {
+    walledprotect: walledaiguardrails,
+  },
+  javelin: {
+    guardrails: javelinguardrails,
+  },
+  'f5-guardrails': {
+    scan: f5GuardrailsScan,
   },
 };

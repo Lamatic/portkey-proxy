@@ -17,6 +17,8 @@ import {
 import { HookSpan } from '../middlewares/hooks';
 import { env } from 'hono/adapter';
 import { OpenAIModelResponseJSONToStreamGenerator } from '../providers/open-ai-base/createModelResponse';
+import { anthropicMessagesJsonToStreamGenerator } from '../providers/anthropic-base/utils/streamGenerator';
+import { endpointStrings } from '../providers/types';
 
 /**
  * Handles various types of responses based on the specified parameters
@@ -34,16 +36,18 @@ import { OpenAIModelResponseJSONToStreamGenerator } from '../providers/open-ai-b
  * @returns {Promise<{response: Response, json?: any}>} - The mapped response.
  */
 export async function responseHandler(
+  c: Context,
   response: Response,
   streamingMode: boolean,
-  provider: string | Options,
+  providerOptions: Options,
   responseTransformer: string | undefined,
   requestURL: string,
   isCacheHit: boolean = false,
   gatewayRequest: Params,
   strictOpenAiCompliance: boolean,
   gatewayRequestUrl: string,
-  areSyncHooksAvailable: boolean
+  areSyncHooksAvailable: boolean,
+  hookSpanId: string
 ): Promise<{
   response: Response;
   responseJson: Record<string, any> | null;
@@ -52,17 +56,16 @@ export async function responseHandler(
   let responseTransformerFunction: Function | undefined;
   const responseContentType = response.headers?.get('content-type');
   const isSuccessStatusCode = [200, 246].includes(response.status);
-
-  if (typeof provider == 'object') {
-    provider = provider.provider || '';
-  }
+  const provider = providerOptions.provider;
 
   const providerConfig = Providers[provider];
   let providerTransformers = Providers[provider]?.responseTransforms;
 
   if (providerConfig?.getConfig) {
-    providerTransformers =
-      providerConfig.getConfig(gatewayRequest).responseTransforms;
+    providerTransformers = providerConfig.getConfig({
+      params: gatewayRequest,
+      providerOptions,
+    }).responseTransforms;
   }
 
   // Checking status 200 so that errors are not considered as stream mode.
@@ -81,6 +84,9 @@ export async function responseHandler(
         responseTransformerFunction =
           OpenAIChatCompleteJSONToStreamResponseTransform;
         break;
+      case 'messages':
+        responseTransformerFunction = anthropicMessagesJsonToStreamGenerator;
+        break;
       case 'createModelResponse':
         responseTransformerFunction = OpenAIModelResponseJSONToStreamGenerator;
         break;
@@ -93,20 +99,21 @@ export async function responseHandler(
     responseTransformerFunction = undefined;
   }
 
-  if (
-    streamingMode &&
-    isSuccessStatusCode &&
-    isCacheHit &&
-    responseTransformerFunction
-  ) {
-    const streamingResponse = await handleJSONToStreamResponse(
-      response,
-      provider,
-      responseTransformerFunction
-    );
-    return { response: streamingResponse, responseJson: null };
-  }
   if (streamingMode && isSuccessStatusCode) {
+    const hooksManager = c.get('hooksManager');
+    const span = hooksManager.getSpan(hookSpanId) as HookSpan;
+    const hooksResult = span.getHooksResult();
+    if (isCacheHit && responseTransformerFunction) {
+      const streamingResponse = await handleJSONToStreamResponse(
+        response,
+        provider,
+        responseTransformerFunction,
+        strictOpenAiCompliance,
+        responseTransformer as endpointStrings,
+        hooksResult
+      );
+      return { response: streamingResponse, responseJson: null };
+    }
     return {
       response: handleStreamingMode(
         response,
@@ -114,7 +121,9 @@ export async function responseHandler(
         responseTransformerFunction,
         requestURL,
         strictOpenAiCompliance,
-        gatewayRequest
+        gatewayRequest,
+        responseTransformer as endpointStrings,
+        hooksResult
       ),
       responseJson: null,
     };
@@ -291,7 +300,7 @@ export async function afterRequestHookHandler(
 
     return createHookResponse(response, responseData, hooksResult);
   } catch (err) {
-    console.error(err);
+    console.error('afterRequestHookHandler error: ', err);
     return response;
   }
 }

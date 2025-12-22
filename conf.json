@@ -2,12 +2,15 @@
   "plugins_enabled": [
     "default",
     "portkey",
+    "qualifire",
     "aporia",
     "sydelabs",
     "pillar",
     "patronus",
     "pangea",
-    "promptsecurity"
+    "promptsecurity",
+    "panw-prisma-airs",
+    "walledai"
   ],
   "credentials": {
     "portkey": {
