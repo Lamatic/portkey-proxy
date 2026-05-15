@@ -63,7 +63,7 @@ class TestPortkeyModel:
                 "x-portkey-provider": "openai"
             },
             json={
-                "model": "dall-e-2",
+                "model": "gpt-image-2",
                 "prompt": "a white siamese cat",
                 "n": 1,
                 "size": "512x512",
