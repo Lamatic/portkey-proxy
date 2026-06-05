@@ -1,4 +1,4 @@
-name = "rubeus"
+name = "ai-gateway"
 compatibility_date = "2024-12-05"
 main = "src/index.ts"
 compatibility_flags = [ "nodejs_compat" ]
@@ -22,7 +22,7 @@ CUSTOM_HEADERS_TO_IGNORE = []
 #Configuration for PRODUCTION environment
 #
 [env.production]
-name = "rubeus"
+name = "ai-gateway"
 logpush=true
 
 [env.production.vars]
