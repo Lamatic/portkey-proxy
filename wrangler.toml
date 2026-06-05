@@ -18,6 +18,10 @@ enabled = true
 persist = true
 head_sampling_rate = 1
 
+[[tail_consumers]]
+service = "production-core-tail"
+
+
 
 [vars]
 ENVIRONMENT = 'dev'
