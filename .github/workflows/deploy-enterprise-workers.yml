@@ -10,7 +10,6 @@ on:
         type: choice
         options:
           - all
-          - ai-gateway
           - production-enterprise-portkey-isolated
           - production-enterprise-portkey-isolated-nologs
   push:
@@ -26,12 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - worker_name: ai-gateway
-            config: wrangler.toml
           - worker_name: production-enterprise-portkey-isolated
             config: wrangler.toml
+            custom_domain: production-enterprise-portkey-isolated.edge.lamatic.tech
           - worker_name: production-enterprise-portkey-isolated-nologs
             config: wrangler.nologs.toml
+            custom_domain: production-enterprise-portkey-isolated-nologs.edge.lamatic.tech
 
     steps:
       - name: Check if this worker should deploy
@@ -57,6 +56,29 @@ jobs:
       - name: Install dependencies
         if: steps.should_deploy.outputs.deploy == 'true'
         run: npm i
+
+      - name: Configure custom domain
+        if: steps.should_deploy.outputs.deploy == 'true'
+        env:
+          CONFIG_FILE: ${{ matrix.config }}
+          CUSTOM_DOMAIN: ${{ matrix.custom_domain }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const configFile = process.env.CONFIG_FILE;
+            const customDomain = process.env.CUSTOM_DOMAIN;
+            const config = fs.readFileSync(configFile, "utf8");
+            const base = `compatibility_flags = [ "nodejs_compat" ]`;
+            if (!config.includes(base)) {
+              throw new Error(`Could not find compatibility_flags marker in ${configFile}`);
+            }
+            const updated = config.replace(
+              base,
+              `${base}\nroutes = [ { pattern = "${customDomain}", custom_domain = true } ]`
+            );
+            fs.writeFileSync(configFile, updated);
+            console.log(`Configured custom domain: ${customDomain}`);
+          '
 
       - name: Deploy ${{ matrix.worker_name }}
         if: steps.should_deploy.outputs.deploy == 'true'
