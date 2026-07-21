@@ -1,0 +1,68 @@
+name: Deploy Enterprise Workers
+
+on:
+  workflow_dispatch:
+    inputs:
+      worker:
+        description: 'Worker to deploy (or all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ai-gateway
+          - production-enterprise-portkey-isolated
+          - production-enterprise-portkey-isolated-nologs
+  push:
+    branches:
+      - lamatic-main
+      - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: Production
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - worker_name: ai-gateway
+            config: wrangler.toml
+          - worker_name: production-enterprise-portkey-isolated
+            config: wrangler.toml
+          - worker_name: production-enterprise-portkey-isolated-nologs
+            config: wrangler.nologs.toml
+
+    steps:
+      - name: Check if this worker should deploy
+        id: should_deploy
+        run: |
+          INPUT="${{ github.event.inputs.worker }}"
+          WORKER="${{ matrix.worker_name }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "all" ] || [ "$INPUT" = "$WORKER" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.should_deploy.outputs.deploy == 'true'
+
+      - name: Setup Node.js
+        if: steps.should_deploy.outputs.deploy == 'true'
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: npm i
+
+      - name: Deploy ${{ matrix.worker_name }}
+        if: steps.should_deploy.outputs.deploy == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: ./
+          command: deploy --minify src/index.ts --config ${{ matrix.config }} --name ${{ matrix.worker_name }}
