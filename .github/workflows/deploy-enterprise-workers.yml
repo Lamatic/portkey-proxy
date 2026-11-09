@@ -35,9 +35,10 @@ jobs:
     steps:
       - name: Check if this worker should deploy
         id: should_deploy
+        env:
+          INPUT: ${{ github.event.inputs.worker }}
+          WORKER: ${{ matrix.worker_name }}
         run: |
-          INPUT="${{ github.event.inputs.worker }}"
-          WORKER="${{ matrix.worker_name }}"
           if [ -z "$INPUT" ] || [ "$INPUT" = "all" ] || [ "$INPUT" = "$WORKER" ]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           else
